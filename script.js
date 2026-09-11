@@ -22,7 +22,7 @@
       // apps-script/README.md) and paste its "/exec" URL here.
       //   e.g. "https://script.google.com/macros/s/AKfy..../exec"
       // When null, forms run in demo mode (no network request).
-      endpoint: null,
+      endpoint: "https://script.google.com/macros/s/AKfycbzD2WbP5JS9G8ZukjHdMSe-08tr7LCV2CqhiJPE9_oVjDPuFcq3nSst27b0IvK33nT2/exec",
       // Transport: "apps-script" sends a CORS preflight-free text/plain POST
       // (required for Google Apps Script). Use "json" for Web3Forms/Formspree/API.
       transport: "apps-script",
