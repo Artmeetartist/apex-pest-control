@@ -17,10 +17,17 @@
     phoneDisplay: "(281) 555-0123",
     email: "hello@apexpestsolutions.com",
     forms: {
-      // e.g. "https://api.web3forms.com/submit" or your CRM endpoint.
+      // Google Apps Script Web App URL that captures leads to a Google Sheet
+      // and sends the auto-reply emails. Deploy apps-script/Code.gs (see
+      // apps-script/README.md) and paste its "/exec" URL here.
+      //   e.g. "https://script.google.com/macros/s/AKfy..../exec"
       // When null, forms run in demo mode (no network request).
       endpoint: null,
-      accessKey: null // e.g. Web3Forms access key
+      // Transport: "apps-script" sends a CORS preflight-free text/plain POST
+      // (required for Google Apps Script). Use "json" for Web3Forms/Formspree/API.
+      transport: "apps-script",
+      // Optional shared secret — must match SHARED_SECRET in Code.gs (leave null to disable).
+      accessKey: null
     },
     ai: {
       // Point at your LLM/agent endpoint to replace the local mock brain.
@@ -289,11 +296,19 @@
     if (CONFIG.forms.endpoint) {
       var body = Object.assign({}, payload);
       if (CONFIG.forms.accessKey) body.access_key = CONFIG.forms.accessKey;
+      // Google Apps Script can't answer a CORS preflight, so send the JSON as
+      // text/plain — a "simple" request the browser dispatches without an
+      // OPTIONS preflight. Apps Script reads it via e.postData.contents.
+      var asText = CONFIG.forms.transport !== "json";
       return fetch(CONFIG.forms.endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(body)
-      }).then(function (r) { if (!r.ok) throw new Error("Network error"); return r.json(); });
+        headers: { "Content-Type": asText ? "text/plain;charset=utf-8" : "application/json" },
+        body: JSON.stringify(body),
+        redirect: "follow"
+      }).then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json().catch(function () { return { result: "success" }; });
+      });
     }
     // Demo mode: emulate latency, log payload for the developer.
     return new Promise(function (resolve) { console.info("[Apex demo] form submission:", payload); setTimeout(resolve, 1100); });
@@ -312,6 +327,8 @@
       var btn = $("[data-submit]", form);
       btn.classList.add("is-loading"); btn.disabled = true;
       var data = {}; new FormData(form).forEach(function (v, k) { data[k] = v; });
+      data.formType = "contact";
+      data.source = "Website contact form";
       data._subject = "New website inquiry — Apex Pest Solutions";
       submitForm(data).then(function () {
         btn.classList.remove("is-loading"); btn.disabled = false;
@@ -444,6 +461,8 @@
 
     function confirmBooking() {
       var data = {}; new FormData(bkForm).forEach(function (v, k) { data[k] = v; });
+      data.formType = "booking";
+      data.source = "Website booking";
       data.service = state.service;
       data.date = state.date ? state.date.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }) : "";
       data.time = state.time;
@@ -458,7 +477,8 @@
         summary.appendChild(div);
       });
       data.reference = ref;
-      submitForm(data); // fire-and-forget in demo; awaited errors handled server-side in prod
+      // Fire-and-forget: the sheet capture + auto-reply email happen server-side.
+      submitForm(data).catch(function () {});
       setStep(5);
       showToast("Inspection booked — ref " + ref);
     }
