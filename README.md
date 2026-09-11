@@ -21,9 +21,13 @@ The differentiator baked into the UX: a **24/7 AI front desk + instant online bo
 ├── index.html      # Semantic markup, SEO meta, JSON-LD, SVG icon sprite, section content, modal & AI templates
 ├── styles.css      # Design system (CSS variables), components, responsive rules, motion
 ├── script.js       # AI assistant, booking flow, form validation, carousel, counters, scroll reveals
-└── assets/
-    ├── favicon.svg # Brand mark
-    └── og-image.png# 1200×630 social share image
+├── assets/
+│   ├── favicon.svg # Brand mark
+│   └── og-image.png# 1200×630 social share image
+└── apps-script/    # Google Sheets lead-capture + auto-reply backend (Apps Script)
+    ├── Code.gs
+    ├── appsscript.json
+    └── README.md   # deploy + connect instructions
 ```
 
 ## Design system
@@ -59,16 +63,21 @@ Then visit `http://localhost:8080`. Serving over HTTP (rather than `file://`) is
 
 The JavaScript is structured so demo behavior can be swapped for live services by editing the `CONFIG` object at the top of `script.js`.
 
-### Forms (contact + booking)
+### Forms (contact + booking) → Google Sheets + auto-reply
+
+The included **Google Apps Script backend** captures every submission to a Google Sheet and emails the customer an automatic reply (booking confirmation with reference number, or a contact acknowledgement) plus an internal notification — no server to host. Full setup in **[`apps-script/README.md`](apps-script/README.md)**; then:
 
 ```js
 CONFIG.forms = {
-  endpoint: "https://api.web3forms.com/submit", // Web3Forms / Formspree / your CRM
-  accessKey: "your-access-key"                  // optional
+  endpoint: "https://script.google.com/macros/s/AKfycb…/exec", // your Apps Script /exec URL
+  transport: "apps-script",  // preflight-free text/plain POST (required for Apps Script)
+  accessKey: null            // optional shared secret; must match SHARED_SECRET in Code.gs
 };
 ```
 
-When `endpoint` is `null`, forms run in **demo mode** (validated, with loading/success states, payload logged to the console — no network request). When set, submissions are `POST`ed as JSON. All forms include a hidden honeypot field for basic spam protection.
+Prefer a different provider? Point `endpoint` at Web3Forms/Formspree/your CRM and set `transport: "json"` (add your `accessKey` if the provider needs one).
+
+When `endpoint` is `null`, forms run in **demo mode** (validated, with loading/success states, payload logged to the console — no network request). All forms include a hidden honeypot field for basic spam protection, and each payload carries a `formType` (`booking` / `contact`) so the backend can route it.
 
 ### AI assistant
 
