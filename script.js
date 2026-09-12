@@ -627,7 +627,7 @@
     var history = [];
     var voiceMode = false;
 
-    if (opts.showClose && closeBtn) { closeBtn.hidden = false; closeBtn.addEventListener("click", function () { if (opts.onClose) opts.onClose(); }); }
+    if (opts.showClose && closeBtn) { closeBtn.hidden = false; closeBtn.addEventListener("click", function () { stopVoice(); if (opts.onClose) opts.onClose(); }); }
 
     function scrollDown() { body.scrollTop = body.scrollHeight; }
 
@@ -702,31 +702,136 @@
     // Text input
     form.addEventListener("submit", function (e) { e.preventDefault(); var v = textInput.value.trim(); if (!v) return; voiceMode = false; textInput.value = ""; send(v); });
 
-    // ---- Speech recognition ----
+    // ================= VOICE: speech-to-text + text-to-speech =================
+    var voiceHint = $("[data-ai-voice-hint]", root);
+    var muteBtn = $("[data-ai-mute]", root);
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    var recog = null, listening = false;
-    if (SR) {
-      recog = new SR(); recog.lang = "en-US"; recog.interimResults = false; recog.maxAlternatives = 1;
-      recog.addEventListener("result", function (e) { var txt = e.results[0][0].transcript; voiceMode = true; send(txt); });
-      recog.addEventListener("end", function () { listening = false; mic.classList.remove("is-listening"); mic.setAttribute("aria-pressed", "false"); micLabel.textContent = "Click to talk"; });
-      recog.addEventListener("error", function () { listening = false; mic.classList.remove("is-listening"); micLabel.textContent = "Click to talk"; });
+    var recog = null, listening = false, finalTranscript = "";
+    var ttsSupported = ("speechSynthesis" in window) && ("SpeechSynthesisUtterance" in window);
+    var ttsMuted = false;
+    try { ttsMuted = localStorage.getItem("apexVoiceMuted") === "1"; } catch (e) {}
+    var HINT_DEFAULT = "Speak naturally — I can help you book, answer questions and more.";
+
+    function setHint(msg, isError) { if (voiceHint) { voiceHint.textContent = msg; voiceHint.classList.toggle("is-error", !!isError); } }
+    function micUI(on) {
+      listening = on;
+      mic.classList.toggle("is-listening", on);
+      mic.setAttribute("aria-pressed", on ? "true" : "false");
+      micLabel.textContent = on ? "Listening… tap to stop" : (SR ? "Tap to speak" : "Voice unavailable");
     }
+
+    // Build the recognizer (feature-detected)
+    if (SR) { try { recog = new SR(); recog.lang = "en-US"; recog.interimResults = true; recog.continuous = false; recog.maxAlternatives = 1; } catch (e) { recog = null; } }
+    if (recog) {
+      recog.addEventListener("result", function (e) {
+        var interim = "";
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          var t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalTranscript += t; else interim += t;
+        }
+        var shown = (finalTranscript + interim).trim();
+        if (shown) { textInput.value = shown; setHint("Listening… “" + shown + "”"); }
+      });
+      recog.addEventListener("speechend", function () { try { recog.stop(); } catch (e) {} });
+      recog.addEventListener("end", function () {
+        micUI(false);
+        var text = (finalTranscript || textInput.value || "").trim();
+        finalTranscript = "";
+        if (text) { textInput.value = ""; setHint(HINT_DEFAULT); voiceMode = true; send(text); }
+        else { setHint("I didn't catch that — tap the mic and try again."); }
+      });
+      recog.addEventListener("error", function (ev) {
+        micUI(false); finalTranscript = "";
+        var m;
+        switch (ev && ev.error) {
+          case "not-allowed":
+          case "service-not-allowed":
+            m = "Microphone blocked. Allow mic access in your browser's site settings, then tap again."; break;
+          case "no-speech": m = "I didn't hear anything — tap the mic and speak clearly."; break;
+          case "audio-capture": m = "No microphone found. Check your device and try again."; break;
+          case "network": m = "Voice needs an internet connection right now."; break;
+          case "aborted": m = null; break; // user stopped — no error message
+          default: m = "Voice hit a snag — please type your message instead.";
+        }
+        if (m) { setHint(m, true); showToast(m); } else setHint(HINT_DEFAULT);
+      });
+    }
+
+    function stopVoice() {
+      if (recog && listening) { try { recog.abort(); } catch (e) {} }
+      micUI(false);
+      if (ttsSupported) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+    }
+
     mic.addEventListener("click", function () {
-      if (!SR) { showToast("Voice isn't supported in this browser — try typing instead."); textInput.focus(); return; }
-      if (listening) { recog.stop(); return; }
-      try { recog.start(); listening = true; mic.classList.add("is-listening"); mic.setAttribute("aria-pressed", "true"); micLabel.textContent = "Listening…"; }
-      catch (err) { /* already started */ }
+      if (!window.isSecureContext && location.protocol !== "file:") { setHint("Voice needs a secure (https) connection.", true); showToast("Voice needs a secure (https) connection."); return; }
+      if (!recog) { setHint("Voice input isn't supported in this browser — try Chrome or Edge, or type below.", true); showToast("Voice input isn't supported here — please type instead."); textInput.focus(); return; }
+      if (listening) { try { recog.stop(); } catch (e) {} return; }
+      if (ttsSupported) { try { window.speechSynthesis.cancel(); } catch (e) {} } // stop any bot speech first
+      finalTranscript = ""; textInput.value = "";
+      try { recog.start(); micUI(true); setHint("Listening… speak now"); }
+      catch (e) { micUI(false); setHint("Couldn't start listening — tap to try again.", true); }
     });
 
+    // ---- Text to speech (bot replies) ----
+    var voices = [];
+    function loadVoices() { if (ttsSupported) { try { voices = window.speechSynthesis.getVoices() || []; } catch (e) { voices = []; } } }
+    if (ttsSupported) {
+      loadVoices();
+      try { window.speechSynthesis.addEventListener("voiceschanged", loadVoices); }
+      catch (e) { window.speechSynthesis.onvoiceschanged = loadVoices; }
+    }
+    function pickVoice() {
+      if (!voices.length) loadVoices();
+      var prefs = ["Google US English", "Samantha", "Microsoft Aria", "Microsoft Jenny", "Microsoft Zira", "Karen", "Moira", "Google UK English Female"];
+      var i, p;
+      for (p = 0; p < prefs.length; p++) for (i = 0; i < voices.length; i++) if (voices[i].name && voices[i].name.indexOf(prefs[p]) !== -1) return voices[i];
+      for (i = 0; i < voices.length; i++) if (/^en[-_]US/i.test(voices[i].lang || "")) return voices[i];
+      for (i = 0; i < voices.length; i++) if (/^en/i.test(voices[i].lang || "")) return voices[i];
+      return null;
+    }
     function speak(html) {
-      if (!("speechSynthesis" in window)) return;
+      if (!ttsSupported || ttsMuted) return;
       var tmp = document.createElement("div"); tmp.innerHTML = html;
-      var u = new SpeechSynthesisUtterance(tmp.textContent || "");
-      u.rate = 1.02; u.pitch = 1; u.lang = "en-US";
-      try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch (e) {}
+      var text = (tmp.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text) return;
+      if (text.length > 320) text = text.slice(0, 320).replace(/\s\S*$/, "") + "…";
+      try {
+        window.speechSynthesis.cancel();
+        var u = new SpeechSynthesisUtterance(text);
+        var v = pickVoice(); if (v) u.voice = v;
+        u.rate = 1.0; u.pitch = 1.0; u.lang = "en-US";
+        window.speechSynthesis.speak(u);
+      } catch (e) {}
     }
 
-    return { root: root, focusInput: function () { textInput.focus(); } };
+    // ---- Mute toggle for voice replies ----
+    function renderMute() {
+      if (!muteBtn) return;
+      muteBtn.setAttribute("aria-pressed", ttsMuted ? "true" : "false");
+      muteBtn.setAttribute("aria-label", ttsMuted ? "Turn voice replies on" : "Mute voice replies");
+      muteBtn.title = ttsMuted ? "Voice replies off" : "Voice replies on";
+      muteBtn.classList.toggle("is-muted", ttsMuted);
+      var use = $("use", muteBtn); if (use) use.setAttribute("href", ttsMuted ? "#i-volume-off" : "#i-volume");
+    }
+    if (muteBtn) {
+      if (!ttsSupported) { muteBtn.hidden = true; }
+      else {
+        renderMute();
+        muteBtn.addEventListener("click", function () {
+          ttsMuted = !ttsMuted;
+          try { localStorage.setItem("apexVoiceMuted", ttsMuted ? "1" : "0"); } catch (e) {}
+          if (ttsMuted) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+          renderMute();
+          showToast(ttsMuted ? "Voice replies muted" : "Voice replies on");
+        });
+      }
+    }
+
+    micUI(false);
+    if (!SR && mic) mic.title = "Voice input isn't supported in this browser";
+
+    return { root: root, focusInput: function () { textInput.focus(); }, stopVoice: stopVoice };
   }
 
   // Mount hero (desktop) + sheet (mobile) instances
@@ -737,13 +842,18 @@
   var sheetMount = $("#aiSheetMount");
   var aiSheet = sheetEl ? makeOverlay(sheetEl, ".ai-sheet__panel", {
     onOpen: function () { fab && fab.setAttribute("aria-expanded", "true"); },
-    onClose: function () { fab && fab.setAttribute("aria-expanded", "false"); }
+    onClose: function () { fab && fab.setAttribute("aria-expanded", "false"); if (sheetAI) sheetAI.stopVoice(); }
   }) : null;
   var sheetAI = sheetMount ? mountAssistant(sheetMount, { showClose: true, onClose: function () { aiSheet && aiSheet.close(); } }) : null;
 
   var fab = $("#aiFab");
   if (fab && aiSheet) fab.addEventListener("click", aiSheet.open);
   $$("[data-close-aisheet]").forEach(function (el) { el.addEventListener("click", function () { aiSheet && aiSheet.close(); }); });
+
+  // Stop speech recognition + voice replies when the tab is hidden
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { if (heroAI) heroAI.stopVoice(); if (sheetAI) sheetAI.stopVoice(); }
+  });
 
   // "Ask our AI assistant" trigger
   document.addEventListener("click", function (e) {
