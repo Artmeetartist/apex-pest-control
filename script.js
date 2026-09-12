@@ -755,6 +755,16 @@
   });
 
   /* ======================================================
+     Photo fallback — if a hotlinked photo fails to load,
+     reveal the vector/gradient fallback beneath it.
+  ====================================================== */
+  $$(".js-photo").forEach(function (img) {
+    function fail() { if (img.parentElement) img.parentElement.classList.add("is-failed"); }
+    img.addEventListener("error", fail);
+    if (img.complete && img.naturalWidth === 0) fail();
+  });
+
+  /* ======================================================
      Footer year
   ====================================================== */
   var yearEl = $("#year"); if (yearEl) yearEl.textContent = new Date().getFullYear();

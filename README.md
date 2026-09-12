@@ -12,7 +12,7 @@ The differentiator baked into the UX: a **24/7 AI front desk + instant online bo
 - **Fully responsive** from 320px phones to widescreen, with a deliberate mobile experience (hamburger nav, bottom sheet AI, horizontal pest scroller, one-column cards, 44px+ touch targets, no horizontal overflow).
 - **Accessible**: skip link, semantic landmarks, focus-visible styles, focus-trapped modals/sheets, ARIA labels, `prefers-reduced-motion` support.
 - **SEO-ready**: descriptive title/meta, Open Graph + Twitter cards, and JSON-LD structured data (`LocalBusiness`/`PestControl`, `Service`, `FAQPage`).
-- **Self-contained visuals**: every icon, pest glyph and illustration is inline SVG — crisp at any resolution, instant load, no external image requests.
+- **Photography with graceful fallback**: real photos (hero, family panel, and an "on the job" gallery) layered over inline-SVG illustrations — if a photo can't load, the on-brand illustration/gradient tile shows instead, so the page never breaks. Every icon and pest glyph is crisp inline SVG.
 
 ## File structure
 
@@ -45,6 +45,17 @@ All design tokens live as CSS custom properties in `:root` (`styles.css`):
 | `--border` | `#E3E8E6` | Hairline borders |
 
 Typography uses **Manrope** (via Google Fonts) with a robust system-font fallback stack and `font-display: swap`.
+
+## Images
+
+The hero, the family/trust panel, and the "on the job" gallery use real photos, each marked with `class="js-photo"` and layered over an inline-SVG (or gradient) fallback. If a photo fails to load, `script.js` adds `.is-failed` to its container and the fallback shows — the page never displays a broken image.
+
+Photos are currently **hotlinked** from a no-key keyword service ([LoremFlickr](https://loremflickr.com)) via `src="https://loremflickr.com/<w>/<h>/<keywords>?lock=<n>"`, with a green brand tint (`.photo-tint`) so varied stock reads on-brand. To use your **own** images (recommended for production):
+
+1. Drop files into `assets/img/` (e.g. `hero.jpg`, `family.jpg`, `work-1.jpg` …).
+2. In `index.html`, change each `js-photo` `src` to the local path (e.g. `src="assets/img/hero.jpg"`).
+
+Keep `loading="lazy"` on below-the-fold images and update the `alt` text. Self-hosting removes the external dependency and gives you full control of quality.
 
 ## Running locally
 
