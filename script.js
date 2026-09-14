@@ -35,14 +35,19 @@
       endpoint: null
     },
     tts: {
-      // Real, human-sounding voice for spoken replies (ElevenLabs / OpenAI),
-      // proxied through your Apps Script so the API key stays server-side.
-      // To turn it on: set enabled:true here, then set TTS_PROVIDER + the API
-      // key in apps-script/Code.gs (see apps-script/README.md). When false (or
-      // if the API fails), the browser's built-in voice is used instead.
-      // `endpoint` defaults to the forms /exec URL when left null.
-      enabled: false,
-      endpoint: null
+      // Real, human-sounding voice for spoken replies.
+      // Modes:
+      //   "proxy"             -> POST to Apps Script (key stays server-side) — best for production.
+      //   "elevenlabs-direct" -> call ElevenLabs straight from the browser using a key stored
+      //                          in the visitor's own localStorage (NEVER committed to the repo).
+      //                          Great for quick testing without a server. Enable the key on a
+      //                          device by opening the site once with ?voicekey=YOUR_KEY.
+      // When enabled is false, or the API/key is unavailable, the browser's built-in voice is used.
+      enabled: true,
+      mode: "elevenlabs-direct",
+      voiceId: "21m00Tcm4TlvDq8ikWAM", // ElevenLabs "Rachel" (premade) — swap for any voice id
+      model: "eleven_turbo_v2_5",
+      endpoint: null // proxy mode only; defaults to the forms /exec URL when null
     }
   };
 
@@ -50,6 +55,29 @@
   var $$ = function (s, c) { return Array.prototype.slice.call((c || document).querySelectorAll(s)); };
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var isMobile = function () { return window.matchMedia("(max-width: 960px)").matches; };
+
+  /* ------------------------------------------------------
+     Voice API key (client test mode) — stored only in this
+     visitor's browser (localStorage), never in the repo.
+     Provision it once by opening the site with ?voicekey=KEY
+     (or ?voicekey=clear to remove); the param is then stripped
+     from the URL so it isn't left in the address bar.
+  ------------------------------------------------------ */
+  function getTtsKey() { try { return localStorage.getItem("apexTtsKey") || ""; } catch (e) { return ""; } }
+  (function provisionTtsKey() {
+    var m = /[?&#]voicekey=([^&#]+)/.exec(location.search + location.hash);
+    if (!m) return;
+    var val = decodeURIComponent(m[1]);
+    try {
+      if (/^(clear|off|none|remove)$/i.test(val)) { localStorage.removeItem("apexTtsKey"); }
+      else if (val.length > 10) { localStorage.setItem("apexTtsKey", val); }
+    } catch (e) {}
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+    setTimeout(function () {
+      if (/^(clear|off|none|remove)$/i.test(val)) showToast("Voice key removed from this device.");
+      else showToast("🔊 Real voice enabled on this device.");
+    }, 400);
+  })();
 
   /* ======================================================
      Overlay / scroll-lock manager
@@ -818,9 +846,29 @@
       var text = (tmp.textContent || "").replace(/\s+/g, " ").trim();
       if (!text) return;
       if (text.length > 600) text = text.slice(0, 600).replace(/\s\S*$/, "") + "…";
-      var url = ttsUrl();
-      if (url) speakViaApi(text, url);
-      else speakViaBrowser(text);
+      var mode = (CONFIG.tts && CONFIG.tts.enabled) ? (CONFIG.tts.mode || "proxy") : "browser";
+      if (mode === "elevenlabs-direct" && getTtsKey()) { speakViaElevenLabsDirect(text); return; }
+      if (mode === "proxy") { var url = CONFIG.tts.endpoint || CONFIG.forms.endpoint; if (url) { speakViaApi(text, url); return; } }
+      speakViaBrowser(text); // no neural voice available -> browser voice
+    }
+
+    // Client-side ElevenLabs (test mode): key comes from the visitor's own
+    // localStorage — never from the repo. Falls back to the browser voice.
+    function speakViaElevenLabsDirect(text) {
+      var key = getTtsKey();
+      if (!key) { speakViaBrowser(text); return; }
+      if (ttsCache[text]) { playAudio(ttsCache[text]); return; }
+      stopSpeaking();
+      var voice = (CONFIG.tts && CONFIG.tts.voiceId) || "21m00Tcm4TlvDq8ikWAM";
+      var model = (CONFIG.tts && CONFIG.tts.model) || "eleven_turbo_v2_5";
+      fetch("https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(voice) + "?output_format=mp3_44100_128", {
+        method: "POST",
+        headers: { "xi-api-key": key, "accept": "audio/mpeg", "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text, model_id: model, voice_settings: { stability: 0.5, similarity_boost: 0.75 } })
+      })
+        .then(function (r) { if (!r.ok) throw new Error("tts " + r.status); return r.blob(); })
+        .then(function (blob) { var u = URL.createObjectURL(blob); ttsCache[text] = u; playAudio(u); })
+        .catch(function () { speakViaBrowser(text); });
     }
 
     function speakViaBrowser(text) {
@@ -872,7 +920,7 @@
       var use = $("use", muteBtn); if (use) use.setAttribute("href", ttsMuted ? "#i-volume-off" : "#i-volume");
     }
     if (muteBtn) {
-      if (!ttsSupported && !ttsUrl()) { muteBtn.hidden = true; }
+      if (!ttsSupported && !(CONFIG.tts && CONFIG.tts.enabled)) { muteBtn.hidden = true; }
       else {
         renderMute();
         muteBtn.addEventListener("click", function () {
