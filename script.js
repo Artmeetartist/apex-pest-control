@@ -33,6 +33,16 @@
       // Point at your LLM/agent endpoint to replace the local mock brain.
       // Expected: POST {message, history} -> {reply, chips?}
       endpoint: null
+    },
+    tts: {
+      // Real, human-sounding voice for spoken replies (ElevenLabs / OpenAI),
+      // proxied through your Apps Script so the API key stays server-side.
+      // To turn it on: set enabled:true here, then set TTS_PROVIDER + the API
+      // key in apps-script/Code.gs (see apps-script/README.md). When false (or
+      // if the API fails), the browser's built-in voice is used instead.
+      // `endpoint` defaults to the forms /exec URL when left null.
+      enabled: false,
+      endpoint: null
     }
   };
 
@@ -760,14 +770,14 @@
     function stopVoice() {
       if (recog && listening) { try { recog.abort(); } catch (e) {} }
       micUI(false);
-      if (ttsSupported) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+      stopSpeaking();
     }
 
     mic.addEventListener("click", function () {
       if (!window.isSecureContext && location.protocol !== "file:") { setHint("Voice needs a secure (https) connection.", true); showToast("Voice needs a secure (https) connection."); return; }
       if (!recog) { setHint("Voice input isn't supported in this browser — try Chrome or Edge, or type below.", true); showToast("Voice input isn't supported here — please type instead."); textInput.focus(); return; }
       if (listening) { try { recog.stop(); } catch (e) {} return; }
-      if (ttsSupported) { try { window.speechSynthesis.cancel(); } catch (e) {} } // stop any bot speech first
+      stopSpeaking(); // stop any bot speech first
       finalTranscript = ""; textInput.value = "";
       try { recog.start(); micUI(true); setHint("Listening… speak now"); }
       catch (e) { micUI(false); setHint("Couldn't start listening — tap to try again.", true); }
@@ -790,19 +800,66 @@
       for (i = 0; i < voices.length; i++) if (/^en/i.test(voices[i].lang || "")) return voices[i];
       return null;
     }
+    // Play spoken replies: real neural voice via the TTS proxy when enabled,
+    // otherwise the browser's built-in voice. Always degrades gracefully.
+    var ttsCache = {}, currentAudio = null;
+
+    function stopSpeaking() {
+      if (ttsSupported) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+      if (currentAudio) { try { currentAudio.pause(); } catch (e) {} currentAudio = null; }
+    }
+    function ttsUrl() {
+      return (CONFIG.tts && CONFIG.tts.enabled) ? (CONFIG.tts.endpoint || CONFIG.forms.endpoint) : null;
+    }
+
     function speak(html) {
-      if (!ttsSupported || ttsMuted) return;
+      if (ttsMuted) return;
       var tmp = document.createElement("div"); tmp.innerHTML = html;
       var text = (tmp.textContent || "").replace(/\s+/g, " ").trim();
       if (!text) return;
-      if (text.length > 320) text = text.slice(0, 320).replace(/\s\S*$/, "") + "…";
+      if (text.length > 600) text = text.slice(0, 600).replace(/\s\S*$/, "") + "…";
+      var url = ttsUrl();
+      if (url) speakViaApi(text, url);
+      else speakViaBrowser(text);
+    }
+
+    function speakViaBrowser(text) {
+      if (!ttsSupported || ttsMuted || !text) return;
       try {
         window.speechSynthesis.cancel();
         var u = new SpeechSynthesisUtterance(text);
         var v = pickVoice(); if (v) u.voice = v;
         u.rate = 1.0; u.pitch = 1.0; u.lang = "en-US";
+        u.onstart = function () { setHint("Speaking…"); };
+        u.onend = function () { setHint(HINT_DEFAULT); };
         window.speechSynthesis.speak(u);
       } catch (e) {}
+    }
+
+    function playAudio(dataUrl) {
+      if (ttsMuted) return;
+      stopSpeaking();
+      try {
+        var a = new Audio(dataUrl); currentAudio = a;
+        setHint("Speaking…");
+        a.onended = function () { if (currentAudio === a) currentAudio = null; setHint(HINT_DEFAULT); };
+        var p = a.play();
+        if (p && p.catch) p.catch(function () { setHint(HINT_DEFAULT); }); // autoplay/decoding issue
+      } catch (e) { setHint(HINT_DEFAULT); }
+    }
+
+    function speakViaApi(text, url) {
+      if (ttsCache[text]) { playAudio(ttsCache[text]); return; }
+      stopSpeaking();
+      var payload = { type: "tts", text: text };
+      if (CONFIG.forms.accessKey) payload.access_key = CONFIG.forms.accessKey;
+      fetch(url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload), redirect: "follow" })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.audio) { var u = "data:" + (d.mime || "audio/mpeg") + ";base64," + d.audio; ttsCache[text] = u; playAudio(u); }
+          else speakViaBrowser(text); // server TTS not configured -> browser voice
+        })
+        .catch(function () { speakViaBrowser(text); });
     }
 
     // ---- Mute toggle for voice replies ----
@@ -815,13 +872,13 @@
       var use = $("use", muteBtn); if (use) use.setAttribute("href", ttsMuted ? "#i-volume-off" : "#i-volume");
     }
     if (muteBtn) {
-      if (!ttsSupported) { muteBtn.hidden = true; }
+      if (!ttsSupported && !ttsUrl()) { muteBtn.hidden = true; }
       else {
         renderMute();
         muteBtn.addEventListener("click", function () {
           ttsMuted = !ttsMuted;
           try { localStorage.setItem("apexVoiceMuted", ttsMuted ? "1" : "0"); } catch (e) {}
-          if (ttsMuted) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+          if (ttsMuted) stopSpeaking();
           renderMute();
           showToast(ttsMuted ? "Voice replies muted" : "Voice replies on");
         });
