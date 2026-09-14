@@ -100,7 +100,12 @@ CONFIG.ai = {
 
 When `endpoint` is `null`, the assistant uses a local intent-matching "brain" (`AI` module in `script.js`) that handles booking, pricing estimates by pest type, service areas, hours, safety, guarantees and human handoff. Point it at an LLM/agent endpoint to go live — the response shape (`reply`, optional `chips`, optional `action: "book"`) is documented inline.
 
-Voice input uses the Web Speech `SpeechRecognition` API (live transcript, clear permission/error messaging, feature-detected). Voice replies use the browser's `SpeechSynthesis` by default, or a **real, human-sounding neural voice** (ElevenLabs / OpenAI) when you enable `CONFIG.tts.enabled` and configure the provider in the Apps Script proxy — see [`apps-script/README.md`](apps-script/README.md#optional-realistic-ai-voice-). It caches audio per phrase and falls back to the browser voice automatically.
+Voice input uses the Web Speech `SpeechRecognition` API (live transcript, clear permission/error messaging, feature-detected). Voice replies use the browser's `SpeechSynthesis` by default, or a **real, human-sounding neural voice** (ElevenLabs / OpenAI) via `CONFIG.tts`. It caches audio per phrase and falls back to the browser voice automatically.
+
+**Two ways to power the neural voice:**
+
+- **Production (`mode: "proxy"`)** — the key lives server-side in the Apps Script proxy. See [`apps-script/README.md`](apps-script/README.md#optional-realistic-ai-voice-).
+- **Quick test (`mode: "elevenlabs-direct"`)** — the browser calls ElevenLabs directly using a key kept only in the visitor's own `localStorage`, **never in the repo**. Provision it on a device by opening the site once with `?voicekey=YOUR_ELEVENLABS_KEY` (the param is saved locally and stripped from the URL; use `?voicekey=clear` to remove). This is for personal testing only — for anything public, use the proxy so the key isn't exposed in the browser.
 
 ## Browser support
 
