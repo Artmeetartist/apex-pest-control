@@ -35,6 +35,18 @@ var CONFIG = {
   // CONFIG.forms.accessKey. Leave "" to accept any submission.
   SHARED_SECRET: "",
 
+  // ---- Realistic AI voice (optional) ----
+  // Human-sounding voice for the assistant's spoken replies.
+  //   "off" (default) | "elevenlabs" | "openai"
+  // Put the API KEY in Project Settings > Script properties (NOT here):
+  //   key name  ELEVENLABS_API_KEY   or   OPENAI_API_KEY
+  // Also set CONFIG.tts.enabled = true in the site's script.js.
+  TTS_PROVIDER: "off",
+  ELEVENLABS_VOICE_ID: "21m00Tcm4TlvDq8ikWAM", // "Rachel" — any ElevenLabs voice id
+  ELEVENLABS_MODEL: "eleven_turbo_v2_5",
+  OPENAI_TTS_VOICE: "nova",   // alloy | echo | fable | onyx | nova | shimmer
+  OPENAI_TTS_MODEL: "tts-1",
+
   // Brand colors used in the emails
   BRAND: "#075B43",
   ACCENT: "#0A6E51"
@@ -54,6 +66,9 @@ function doPost(e) {
       return json({ result: "error", message: "Unauthorized" });
     }
 
+    // Text-to-speech proxy for the assistant's realistic voice
+    if (String(data.type || "").toLowerCase() === "tts") return handleTTS(data);
+
     var type = String(data.formType || "").toLowerCase();
     return (type === "booking") ? handleBooking(data) : handleLead(data);
   } catch (err) {
@@ -64,6 +79,47 @@ function doPost(e) {
 // Health check — visiting the /exec URL in a browser confirms it's live.
 function doGet() {
   return json({ result: "ok", service: CONFIG.BUSINESS_NAME + " lead endpoint" });
+}
+
+/* ============================ VOICE (TTS proxy) ============================ */
+// Converts reply text to speech using a neural TTS provider, keeping the API
+// key server-side. Returns { audio: <base64 mp3>, mime: "audio/mpeg" }.
+function handleTTS(d) {
+  var text = String(d.text || "").replace(/\s+/g, " ").trim().slice(0, 800);
+  if (!text) return json({ result: "error", message: "No text" });
+  var provider = String(CONFIG.TTS_PROVIDER || "off").toLowerCase();
+  if (provider === "elevenlabs") return ttsElevenLabs(text);
+  if (provider === "openai") return ttsOpenAI(text);
+  return json({ result: "error", message: "TTS is off (set CONFIG.TTS_PROVIDER)" });
+}
+
+function ttsElevenLabs(text) {
+  var key = PropertiesService.getScriptProperties().getProperty("ELEVENLABS_API_KEY");
+  if (!key) return json({ result: "error", message: "Missing ELEVENLABS_API_KEY in Script properties" });
+  var url = "https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(CONFIG.ELEVENLABS_VOICE_ID) + "?output_format=mp3_44100_128";
+  var resp = UrlFetchApp.fetch(url, {
+    method: "post",
+    headers: { "xi-api-key": key, "accept": "audio/mpeg" },
+    contentType: "application/json",
+    payload: JSON.stringify({ text: text, model_id: CONFIG.ELEVENLABS_MODEL, voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) return json({ result: "error", message: "ElevenLabs " + resp.getResponseCode() + ": " + resp.getContentText().slice(0, 180) });
+  return json({ result: "success", mime: "audio/mpeg", audio: Utilities.base64Encode(resp.getBlob().getBytes()) });
+}
+
+function ttsOpenAI(text) {
+  var key = PropertiesService.getScriptProperties().getProperty("OPENAI_API_KEY");
+  if (!key) return json({ result: "error", message: "Missing OPENAI_API_KEY in Script properties" });
+  var resp = UrlFetchApp.fetch("https://api.openai.com/v1/audio/speech", {
+    method: "post",
+    headers: { "Authorization": "Bearer " + key },
+    contentType: "application/json",
+    payload: JSON.stringify({ model: CONFIG.OPENAI_TTS_MODEL, voice: CONFIG.OPENAI_TTS_VOICE, input: text, response_format: "mp3" }),
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) return json({ result: "error", message: "OpenAI " + resp.getResponseCode() + ": " + resp.getContentText().slice(0, 180) });
+  return json({ result: "success", mime: "audio/mpeg", audio: Utilities.base64Encode(resp.getBlob().getBytes()) });
 }
 
 /* ============================ HANDLERS ============================ */

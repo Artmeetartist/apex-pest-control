@@ -77,6 +77,29 @@ To stop others from POSTing to your endpoint:
 2. In `script.js` set `forms.accessKey` to the **same** string.
 3. Redeploy the web app (**Deploy → Manage deployments → edit → Version: New version**) and push the site.
 
+## Optional: realistic AI voice 🔊
+
+By default the assistant speaks with the browser's built-in voice (robotic). For a **real, human-sounding voice**, the same Apps Script can proxy a neural TTS provider — so your API key stays server-side (never in the public site).
+
+Pick one provider:
+
+| Provider | Sounds like | Rough cost | Free tier |
+| --- | --- | --- | --- |
+| **ElevenLabs** | The most human / premium | ~$5/mo (Starter) ≈ 30k chars | ~10k chars/mo free |
+| **OpenAI** (`tts-1`) | Very natural, simpler | ~$0.015 per 1,000 chars | none (pay-as-you-go) |
+
+**Setup:**
+
+1. Get an API key from [ElevenLabs](https://elevenlabs.io) **or** [OpenAI](https://platform.openai.com/api-keys).
+2. In the Apps Script editor: **Project Settings (⚙) → Script properties → Add script property**:
+   - ElevenLabs → name `ELEVENLABS_API_KEY`, value = your key
+   - OpenAI → name `OPENAI_API_KEY`, value = your key
+3. In `Code.gs` `CONFIG`, set `TTS_PROVIDER` to `"elevenlabs"` or `"openai"` (optionally pick a voice: `ELEVENLABS_VOICE_ID` or `OPENAI_TTS_VOICE`).
+4. **Deploy → Manage deployments → ✎ Edit → Version: New version → Deploy** (re-authorize when prompted — it now needs permission to call the external API).
+5. In the site's `script.js`, set `CONFIG.tts.enabled = true`, then commit/push.
+
+That's it — spoken replies now use the real voice. The site fetches audio from your endpoint, caches it per phrase, and **automatically falls back to the browser voice** if the API is unavailable. Only spoken (voice-mode) replies are sent to TTS, which keeps usage/cost low; visitors can mute replies with the speaker icon.
+
 ## Updating the script later
 
 After editing `Code.gs`, redeploy the **same** URL: **Deploy → Manage deployments → ✎ Edit → Version: New version → Deploy**. Creating a *new* deployment gives a new URL (which you'd then have to update in `script.js`).

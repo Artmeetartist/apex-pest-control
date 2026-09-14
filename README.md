@@ -100,7 +100,7 @@ CONFIG.ai = {
 
 When `endpoint` is `null`, the assistant uses a local intent-matching "brain" (`AI` module in `script.js`) that handles booking, pricing estimates by pest type, service areas, hours, safety, guarantees and human handoff. Point it at an LLM/agent endpoint to go live — the response shape (`reply`, optional `chips`, optional `action: "book"`) is documented inline.
 
-Voice input uses the Web Speech `SpeechRecognition` API and voice replies use `SpeechSynthesis`, both feature-detected with graceful fallback to text.
+Voice input uses the Web Speech `SpeechRecognition` API (live transcript, clear permission/error messaging, feature-detected). Voice replies use the browser's `SpeechSynthesis` by default, or a **real, human-sounding neural voice** (ElevenLabs / OpenAI) when you enable `CONFIG.tts.enabled` and configure the provider in the Apps Script proxy — see [`apps-script/README.md`](apps-script/README.md#optional-realistic-ai-voice-). It caches audio per phrase and falls back to the browser voice automatically.
 
 ## Browser support
 
